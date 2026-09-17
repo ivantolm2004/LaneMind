@@ -9,8 +9,10 @@ const app = await electron.launch({
 try {
   const window = await app.firstWindow();
   await window.waitForLoadState("domcontentloaded");
+  await window.locator(".runtime-bar").waitFor({ state: "visible", timeout: 15_000 });
   await window.getByRole("button", { name: "Запустить демо" }).click();
   await window.getByText("Match #8400000001").waitFor({ state: "visible", timeout: 15_000 });
+  await window.getByRole("button", { name: "Синхронизировать" }).waitFor({ state: "visible", timeout: 15_000 });
   const score = await window.locator(".score-ring strong").innerText();
   const findings = await window.locator(".finding-list details").count();
   if (!/^\d+$/.test(score) || findings < 3) {

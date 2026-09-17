@@ -11,6 +11,10 @@ LaneMind is a local-first, open-source Dota 2 coaching prototype. It imports Ope
 - Explainable match analysis and recurring-problem training plan
 - Local SQLite persistence
 - Demo match for offline evaluation
+- Automatic CPU, RAM, and NVIDIA VRAM detection
+- FPS protection that pauses AI inference while `dota2.exe` is active
+- Hardware-aware recommendations for Qwen3 1.7B, 4B, or 8B through Ollama
+- A guarded Ollama provider that cannot start inference while Dota 2 is active
 
 Native `.dem` replay parsing and local LLM rewriting are the next milestones. The current analysis is deterministic and does not need a model or API key.
 

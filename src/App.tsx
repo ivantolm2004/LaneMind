@@ -26,6 +26,13 @@ type Report = {
 };
 type Plan = { matches_analyzed: number; focus: Finding[]; next_review_after_matches: number; status: string };
 type Status = { version: string; reports: Report[]; plan: Plan };
+type RuntimeStatus = {
+  hardware: { cpu: string; cpu_threads: number; ram_gb: number; gpus: Array<{ name: string; vram_gb: number }> };
+  dota_active: boolean;
+  fps_protection: boolean;
+  policy: { mode: string; model: string | null; post_match_model: string | null; model_installed: boolean };
+  ollama: { available: boolean; models: string[] };
+};
 
 const copy = {
   ru: {
@@ -40,6 +47,9 @@ const copy = {
     dataSummary: "базовые данные", dataReplay: "данные replay", win: "Победа", loss: "Поражение",
     loading: "Анализируем…", ready: "Готово", error: "Не удалось выполнить операцию",
     goal: "Цель", allFindings: "Все наблюдения", select: "Выберите матч из истории",
+    fpsTitle: "Защита FPS", dotaPaused: "Dota 2 активна — нейросеть приостановлена",
+    systemReady: "Dota 2 не запущена — анализ разрешён", recommended: "После матча",
+    ollamaMissing: "Ollama не обнаружена", cpuOnly: "Только CPU",
   },
   en: {
     navOverview: "Overview", navMatches: "Matches", navPlan: "My plan", navSettings: "Settings",
@@ -53,6 +63,9 @@ const copy = {
     dataSummary: "summary data", dataReplay: "replay data", win: "Victory", loss: "Defeat",
     loading: "Analyzing…", ready: "Ready", error: "Operation failed",
     goal: "Target", allFindings: "All findings", select: "Select a match from history",
+    fpsTitle: "FPS protection", dotaPaused: "Dota 2 is active — AI is paused",
+    systemReady: "Dota 2 is not running — analysis enabled", recommended: "After the match",
+    ollamaMissing: "Ollama not detected", cpuOnly: "CPU only",
   },
 };
 
@@ -73,6 +86,7 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const t = copy[lang];
   const selected = useMemo(() => reports.find((r) => r.match_id === selectedId) ?? reports[0], [reports, selectedId]);
 
@@ -86,6 +100,13 @@ function App() {
 
   useEffect(() => {
     coreCall<Status>({ action: "status" }).then(applyResult).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const refresh = () => coreCall<RuntimeStatus>({ action: "runtime_status" }).then(setRuntime).catch(() => undefined);
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const run = async (operation: () => Promise<unknown>) => {
@@ -140,6 +161,13 @@ function App() {
           <button className="secondary" disabled={busy} onClick={importFile}>↥ {t.import}</button>
           <button className="ghost" disabled={busy} onClick={() => run(() => coreCall({ action: "demo" }))}>{t.demo}</button>
         </section>
+        {runtime && <section className={`runtime-bar panel ${runtime.dota_active ? "protecting" : "idle"}`}>
+          <div className="shield">{runtime.dota_active ? "Ⅱ" : "✓"}</div>
+          <div className="runtime-copy"><span>{t.fpsTitle}</span><b>{runtime.dota_active ? t.dotaPaused : t.systemReady}</b></div>
+          <div className="hardware-chip"><small>RAM</small><b>{runtime.hardware.ram_gb} GB</b></div>
+          <div className="hardware-chip gpu"><small>GPU</small><b>{runtime.hardware.gpus[0]?.name ?? t.cpuOnly}</b><em>{runtime.hardware.gpus[0] ? `${runtime.hardware.gpus[0].vram_gb} GB VRAM` : `${runtime.hardware.cpu_threads} threads`}</em></div>
+          <div className="hardware-chip model"><small>{t.recommended}</small><b>{runtime.policy.post_match_model ?? "OFF"}</b><em>{runtime.ollama.available ? (runtime.policy.model_installed ? "installed" : "download required") : t.ollamaMissing}</em></div>
+        </section>}
         {error && <div className="error"><b>{t.error}</b><span>{error}</span><button onClick={() => setError("")}>×</button></div>}
 
         <div className="grid">

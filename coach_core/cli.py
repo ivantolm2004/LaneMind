@@ -10,6 +10,7 @@ from typing import Any
 
 from .analysis import analyze_match, build_training_plan
 from .demo import DEMO_MATCH
+from .runtime import runtime_status
 from .store import Store
 
 
@@ -31,6 +32,8 @@ def normalize_payload(payload: Any) -> list[dict[str, Any]]:
 
 def process(store: Store, request: dict[str, Any]) -> Any:
     action = request.get("action")
+    if action == "runtime_status":
+        return runtime_status()
     if action == "status":
         reports = store.reports()
         return {"version": "0.1.0", "reports": reports, "plan": build_training_plan(reports)}
