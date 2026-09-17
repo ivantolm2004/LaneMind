@@ -23,6 +23,7 @@ type Report = {
   findings: Finding[];
   data_quality: "summary" | "replay";
   source?: string;
+  ai_summary?: { model: string; language: string; content: string; created_at: string };
 };
 type Plan = { matches_analyzed: number; focus: Finding[]; next_review_after_matches: number; status: string };
 type Status = { version: string; reports: Report[]; plan: Plan };
@@ -32,7 +33,11 @@ type RuntimeStatus = {
   fps_protection: boolean;
   policy: { mode: string; model: string | null; post_match_model: string | null; model_installed: boolean };
   ollama: { available: boolean; models: string[] };
+  selected_model: string;
+  automatic_model: string | null;
+  catalog: Array<{ id: string; label: string; size_gb: number; tier: string; installed: boolean; compatible: boolean; recommended: boolean }>;
 };
+type SummaryResult = { status: string; reason?: string; model?: string; content?: string | null; queued?: boolean };
 
 const copy = {
   ru: {
@@ -50,6 +55,11 @@ const copy = {
     fpsTitle: "Защита FPS", dotaPaused: "Dota 2 активна — нейросеть приостановлена",
     systemReady: "Dota 2 не запущена — анализ разрешён", recommended: "После матча",
     ollamaMissing: "Ollama не обнаружена", cpuOnly: "Только CPU",
+    modelManager: "Локальная нейросеть", automatic: "Автоматический выбор", noModel: "Без нейросети",
+    install: "Скачать модель", installing: "Загрузка…", installed: "Установлена", incompatible: "Мало памяти",
+    aiCoach: "Объяснение нейросети", generateAi: "Создать AI-отчёт", generatingAi: "Нейросеть анализирует…",
+    queuedAi: "Отчёт поставлен в очередь до завершения Dota 2.", noOllama: "Запустите Ollama, чтобы использовать локальную нейросеть.",
+    factsOnly: "Модель получает только рассчитанные факты и не должна выдумывать события.",
   },
   en: {
     navOverview: "Overview", navMatches: "Matches", navPlan: "My plan", navSettings: "Settings",
@@ -66,6 +76,11 @@ const copy = {
     fpsTitle: "FPS protection", dotaPaused: "Dota 2 is active — AI is paused",
     systemReady: "Dota 2 is not running — analysis enabled", recommended: "After the match",
     ollamaMissing: "Ollama not detected", cpuOnly: "CPU only",
+    modelManager: "Local AI model", automatic: "Automatic selection", noModel: "No AI model",
+    install: "Download model", installing: "Downloading…", installed: "Installed", incompatible: "Not enough memory",
+    aiCoach: "AI explanation", generateAi: "Generate AI report", generatingAi: "AI is analyzing…",
+    queuedAi: "The report is queued until Dota 2 closes.", noOllama: "Start Ollama to use a local AI model.",
+    factsOnly: "The model receives calculated facts only and must not invent events.",
   },
 };
 
@@ -87,6 +102,9 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
+  const [modelBusy, setModelBusy] = useState(false);
+  const [summaryBusy, setSummaryBusy] = useState(false);
+  const [summary, setSummary] = useState<SummaryResult | null>(null);
   const t = copy[lang];
   const selected = useMemo(() => reports.find((r) => r.match_id === selectedId) ?? reports[0], [reports, selectedId]);
 
@@ -101,6 +119,20 @@ function App() {
   useEffect(() => {
     coreCall<Status>({ action: "status" }).then(applyResult).catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    setSummary(selected?.ai_summary ? {
+      status: "complete", model: selected.ai_summary.model, content: selected.ai_summary.content,
+    } : null);
+  }, [selected?.match_id]);
+
+  useEffect(() => {
+    if (summary?.status !== "deferred" || !runtime || runtime.dota_active || !selected) return;
+    setSummaryBusy(true);
+    coreCall<SummaryResult>({ action: "generate_summary", match_id: selected.match_id, language: lang })
+      .then(setSummary).catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setSummaryBusy(false));
+  }, [runtime?.dota_active, summary?.status, selected?.match_id, lang]);
 
   useEffect(() => {
     const refresh = () => coreCall<RuntimeStatus>({ action: "runtime_status" }).then(setRuntime).catch(() => undefined);
@@ -127,6 +159,33 @@ function App() {
     return value ?? { reports, plan };
   });
 
+  const selectModel = async (model: string) => {
+    setModelBusy(true); setError("");
+    try { setRuntime(await coreCall<RuntimeStatus>({ action: "set_model", model })); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setModelBusy(false); }
+  };
+
+  const installModel = async () => {
+    if (!runtime) return;
+    const model = runtime.selected_model === "auto" ? runtime.automatic_model : runtime.selected_model;
+    if (!model || model === "off") return;
+    setModelBusy(true); setError("");
+    try {
+      const result = await coreCall<{ runtime: RuntimeStatus }>({ action: "pull_model", model });
+      if (result.runtime) setRuntime(result.runtime);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setModelBusy(false); }
+  };
+
+  const generateSummary = async () => {
+    if (!selected) return;
+    setSummaryBusy(true); setError("");
+    try { setSummary(await coreCall<SummaryResult>({ action: "generate_summary", match_id: selected.match_id, language: lang })); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setSummaryBusy(false); }
+  };
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -142,7 +201,7 @@ function App() {
           <button className={lang === "ru" ? "selected" : ""} onClick={() => setLang("ru")}>RU</button>
           <button className={lang === "en" ? "selected" : ""} onClick={() => setLang("en")}>EN</button>
         </div>
-        <div className="version">v0.1 prototype</div>
+        <div className="version">v0.2 prototype</div>
       </aside>
 
       <main>
@@ -187,6 +246,14 @@ function App() {
                 <div className="severity">{selected.findings[0].severity}</div>
                 <div><span>{t.focus}</span><h3>{selected.findings[0][`title_${lang}`]}</h3><p>{selected.findings[0][`advice_${lang}`]}</p></div>
               </div>}
+              <div className={`ai-summary ${summary?.status ?? "idle"}`}>
+                <div className="ai-summary-head"><div><span>LOCAL AI</span><h3>{t.aiCoach}</h3></div>{summary?.model && <em>{summary.model}</em>}</div>
+                {summary?.status === "complete" && <p>{summary.content}</p>}
+                {summary?.status === "deferred" && <p>{t.queuedAi}</p>}
+                {summary?.status === "unavailable" && <p>{summary.reason === "ollama_unavailable" ? t.noOllama : t.install}</p>}
+                {!summary && <><p>{runtime?.ollama.available ? t.factsOnly : t.noOllama}</p><button disabled={summaryBusy || runtime?.selected_model === "off" || !runtime?.ollama.available || !runtime?.policy.model_installed} onClick={generateSummary}>{summaryBusy ? t.generatingAi : t.generateAi}</button></>}
+                {summary?.status === "deferred" && <button disabled>{t.generatingAi}</button>}
+              </div>
               <div className="quality">● {selected.data_quality === "replay" ? t.dataReplay : t.dataSummary}</div>
               <h3 className="subhead">{t.allFindings}</h3>
               <div className="finding-list">
@@ -204,6 +271,21 @@ function App() {
           </section>
 
           <aside className="right-column">
+            {runtime && <section className="models panel">
+              <div className="section-head"><div><span>OLLAMA</span><h2>{t.modelManager}</h2></div><div className={`ollama-dot ${runtime.ollama.available ? "online" : ""}`}/></div>
+              <select value={runtime.selected_model} disabled={modelBusy} onChange={(event) => selectModel(event.target.value)}>
+                <option value="auto">{t.automatic} · {runtime.automatic_model ?? "OFF"}</option>
+                <option value="off">{t.noModel}</option>
+                {runtime.catalog.map((model) => <option key={model.id} value={model.id} disabled={!model.compatible}>
+                  {model.label} · {model.size_gb} GB{model.installed ? ` · ${t.installed}` : ""}{!model.compatible ? ` · ${t.incompatible}` : ""}
+                </option>)}
+              </select>
+              <div className="model-meta">
+                <span>{runtime.ollama.available ? `${runtime.ollama.models.length} ${t.installed.toLowerCase()}` : t.ollamaMissing}</span>
+                <b>{runtime.policy.post_match_model ?? "OFF"}</b>
+              </div>
+              {!runtime.policy.model_installed && runtime.policy.post_match_model && <button className="model-install" disabled={modelBusy || !runtime.ollama.available || runtime.dota_active} onClick={installModel}>{modelBusy ? t.installing : t.install}</button>}
+            </section>}
             <section className="plan panel">
               <div className="section-head"><div><span>TRAINING LOOP</span><h2>{t.plan}</h2></div><div className="plan-count">{plan.focus.length}/3</div></div>
               {plan.focus.length ? plan.focus.map((finding, index) => <div className="plan-item" key={finding.key}>

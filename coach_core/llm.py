@@ -57,6 +57,7 @@ class LocalModelProvider:
                     {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
                 ],
                 "options": {"temperature": 0.2},
+                "keep_alive": "0",
             }
         ).encode("utf-8")
         request = urllib.request.Request(
@@ -74,3 +75,16 @@ class LocalModelProvider:
             "queued": False,
             "content": payload.get("message", {}).get("content", ""),
         }
+
+
+def pull_model(model: str) -> dict[str, Any]:
+    body = json.dumps({"model": model, "stream": False}).encode("utf-8")
+    request = urllib.request.Request(
+        "http://127.0.0.1:11434/api/pull",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=3600) as response:
+        payload = json.load(response)
+    return {"model": model, "status": payload.get("status", "success")}

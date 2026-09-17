@@ -1,6 +1,6 @@
 {
   "name": "lanemind",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Local-first open source Dota 2 coaching prototype",
   "main": "dist-electron/main.js",

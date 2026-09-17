@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from coach_core.llm import LocalModelProvider
-from coach_core.runtime import GpuInfo, HardwareProfile, choose_model, is_dota_running
+from coach_core.runtime import GpuInfo, HardwareProfile, choose_model, is_dota_running, runtime_status
 
 
 class RuntimePolicyTests(unittest.TestCase):
@@ -24,6 +24,17 @@ class RuntimePolicyTests(unittest.TestCase):
     def test_quality_hardware_uses_eight_billion_model(self):
         policy = choose_model(self.profile(ram=32, vram=12), dota_active=False)
         self.assertEqual(policy["model"], "qwen3:8b")
+
+    @patch("coach_core.runtime.ollama_models")
+    @patch("coach_core.runtime.is_dota_running", return_value=False)
+    @patch("coach_core.runtime.detect_hardware")
+    def test_explicit_model_selection_overrides_automatic_choice(self, hardware, _dota, ollama):
+        hardware.return_value = self.profile(ram=32, vram=12)
+        ollama.return_value = {"available": True, "models": ["gemma3:4b"]}
+        status = runtime_status("gemma3:4b")
+        self.assertEqual(status["automatic_model"], "qwen3:8b")
+        self.assertEqual(status["policy"]["model"], "gemma3:4b")
+        self.assertTrue(status["policy"]["model_installed"])
 
     def test_cpu_only_machine_can_use_light_model(self):
         policy = choose_model(self.profile(ram=8, vram=0), dota_active=False)

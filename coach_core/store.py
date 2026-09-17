@@ -25,6 +25,15 @@ class Store:
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS ai_summaries (
+              match_id TEXT NOT NULL,
+              model TEXT NOT NULL,
+              language TEXT NOT NULL,
+              content TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(match_id, model, language),
+              FOREIGN KEY(match_id) REFERENCES matches(match_id)
+            );
             """
         )
 
@@ -48,8 +57,43 @@ class Store:
             report = json.loads(row["report_json"])
             report["source"] = row["source"]
             report["imported_at"] = row["imported_at"]
+            summary = self.connection.execute(
+                """SELECT model, language, content, created_at FROM ai_summaries
+                   WHERE match_id = ? ORDER BY created_at DESC LIMIT 1""",
+                (report["match_id"],),
+            ).fetchone()
+            if summary:
+                report["ai_summary"] = dict(summary)
             result.append(report)
         return result
+
+    def report(self, match_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT report_json FROM matches WHERE match_id = ?", (match_id,)
+        ).fetchone()
+        return json.loads(row["report_json"]) if row else None
+
+    def save_ai_summary(self, match_id: str, model: str, language: str, content: str) -> None:
+        self.connection.execute(
+            """INSERT INTO ai_summaries(match_id, model, language, content)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(match_id, model, language) DO UPDATE SET
+                 content=excluded.content, created_at=CURRENT_TIMESTAMP""",
+            (match_id, model, language, content),
+        )
+        self.connection.commit()
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        row = self.connection.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.connection.execute(
+            """INSERT INTO settings(key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+            (key, value),
+        )
+        self.connection.commit()
 
     def close(self) -> None:
         self.connection.close()

@@ -11,6 +11,15 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
+MODEL_CATALOG = [
+    {"id": "qwen3:1.7b", "label": "Qwen3 1.7B", "size_gb": 1.4, "tier": "light", "min_ram_gb": 8},
+    {"id": "qwen3:4b", "label": "Qwen3 4B", "size_gb": 2.5, "tier": "balanced", "min_ram_gb": 16},
+    {"id": "gemma3:4b", "label": "Gemma 3 4B", "size_gb": 3.3, "tier": "balanced", "min_ram_gb": 16},
+    {"id": "qwen3:8b", "label": "Qwen3 8B", "size_gb": 5.2, "tier": "quality", "min_ram_gb": 24},
+    {"id": "qwen3:14b", "label": "Qwen3 14B", "size_gb": 9.3, "tier": "quality", "min_ram_gb": 32},
+]
+
+
 @dataclass(frozen=True)
 class GpuInfo:
     name: str
@@ -162,18 +171,47 @@ def ollama_models() -> dict[str, Any]:
         return {"available": False, "models": []}
 
 
-def runtime_status() -> dict[str, Any]:
+def runtime_status(selected_model: str = "auto") -> dict[str, Any]:
     profile = detect_hardware()
     dota_active = is_dota_running()
-    policy = choose_model(profile, dota_active)
     post_match_policy = choose_model(profile, False)
-    policy["post_match_model"] = post_match_policy.get("model")
+    auto_model = post_match_policy.get("model")
+    requested_model = auto_model if selected_model == "auto" else selected_model
+    if dota_active:
+        policy = choose_model(profile, True)
+        policy["post_match_model"] = None if selected_model == "off" else requested_model
+    elif selected_model == "off":
+        policy = {
+            "mode": "disabled", "model": None, "post_match_model": None,
+            "reason": "user_disabled", "queue_inference": False,
+        }
+    elif requested_model:
+        catalog_item = next((item for item in MODEL_CATALOG if item["id"] == requested_model), None)
+        policy = {
+            "mode": "ready", "model": requested_model, "post_match_model": requested_model,
+            "tier": catalog_item["tier"] if catalog_item else "custom",
+            "reason": "automatic" if selected_model == "auto" else "user_selected",
+            "queue_inference": False,
+        }
+    else:
+        policy = choose_model(profile, False)
+        policy["post_match_model"] = policy.get("model")
     ollama = ollama_models()
     recommended = policy.get("model") or policy.get("post_match_model")
     policy["model_installed"] = bool(
         recommended
         and any(name == recommended or name.startswith(f"{recommended}-") for name in ollama["models"])
     )
+    installed_names = set(ollama["models"])
+    catalog = [
+        {
+            **item,
+            "installed": item["id"] in installed_names,
+            "compatible": profile.ram_gb >= item["min_ram_gb"],
+            "recommended": item["id"] == auto_model,
+        }
+        for item in MODEL_CATALOG
+    ]
     return {
         "hardware": {
             **asdict(profile),
@@ -181,6 +219,9 @@ def runtime_status() -> dict[str, Any]:
         },
         "dota_active": dota_active,
         "fps_protection": True,
+        "selected_model": selected_model,
+        "automatic_model": auto_model,
         "policy": policy,
         "ollama": ollama,
+        "catalog": catalog,
     }
