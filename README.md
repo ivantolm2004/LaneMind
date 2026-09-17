@@ -18,8 +18,11 @@ LaneMind is a local-first, open-source Dota 2 coaching prototype. It imports Ope
 - Model manager with automatic, manual, and disabled modes
 - Model downloads through the local Ollama API
 - AI-generated explanations that are stored with the analyzed match
+- Optional Gemini cloud coaching with structured, fact-grounded reports
+- Encrypted Gemini API-key storage through Electron's operating-system credential protection
+- AI provider switch: Gemini Cloud, local Ollama, or deterministic analysis without AI
 
-Native `.dem` replay parsing is the next major milestone. Deterministic analysis works without a model; AI explanations are optional and run locally through Ollama.
+Native `.dem` replay parsing is the next major milestone. Deterministic analysis works without a model. AI explanations are optional and can run locally through Ollama or through the Gemini API after the user adds a key in the desktop app.
 
 ## Development
 
@@ -48,7 +51,7 @@ JSON import accepts a full OpenDota match object, a list of match objects, or an
 
 ## Privacy
 
-Imported data is stored only in Electron's local application data directory. OpenDota requests are made directly by the local Python process. No LaneMind server is involved.
+Imported data is stored in Electron's local application data directory. OpenDota requests are made directly by the local Python process. No LaneMind server is involved. When Gemini Cloud is selected, LaneMind sends only the deterministic report for the selected match to the Gemini API; the original imported match payload and API key are not sent to a LaneMind server. The Gemini key is encrypted with Electron `safeStorage` and never stored in the repository.
 
 ## License
 

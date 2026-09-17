@@ -1,7 +1,9 @@
+import io
+import json
 import unittest
 from unittest.mock import patch
 
-from coach_core.llm import LocalModelProvider
+from coach_core.llm import GeminiModelProvider, LocalModelProvider
 from coach_core.runtime import GpuInfo, HardwareProfile, choose_model, is_dota_running, runtime_status
 
 
@@ -58,6 +60,47 @@ class RuntimePolicyTests(unittest.TestCase):
         result = provider.generate({"match_id": "1"})
         self.assertEqual(result["status"], "deferred")
         self.assertTrue(result["queued"])
+        urlopen.assert_not_called()
+
+    @patch("coach_core.llm.urllib.request.urlopen")
+    def test_gemini_provider_returns_grounded_structured_report(self, urlopen):
+        response_payload = {
+            "candidates": [{
+                "content": {"parts": [{"text": json.dumps({
+                    "summary": "Главный риск — лишние смерти.",
+                    "priorities": [{
+                        "title": "Снизить смерти",
+                        "evidence": "В отчёте отмечена низкая выживаемость.",
+                        "action": "Не принимать драку без преимущества.",
+                        "exercise": "Три матча с лимитом смертей.",
+                    }],
+                    "confidence": 0.8,
+                }, ensure_ascii=False)}]},
+                "finishReason": "STOP",
+            }],
+            "usageMetadata": {"promptTokenCount": 120, "candidatesTokenCount": 45, "totalTokenCount": 165},
+        }
+        urlopen.return_value.__enter__.return_value = io.BytesIO(
+            json.dumps(response_payload, ensure_ascii=False).encode("utf-8")
+        )
+        provider = GeminiModelProvider(
+            lambda: {"dota_active": False}, api_key="test-api-key-that-is-long-enough"
+        )
+        result = provider.generate({"match_id": "1", "findings": []}, "ru")
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["provider"], "gemini")
+        self.assertIn("Снизить смерти", result["content"])
+        self.assertEqual(result["usage"]["total_tokens"], 165)
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header("X-goog-api-key"), "test-api-key-that-is-long-enough")
+
+    @patch("coach_core.llm.urllib.request.urlopen")
+    def test_gemini_never_calls_cloud_while_dota_is_active(self, urlopen):
+        provider = GeminiModelProvider(
+            lambda: {"dota_active": True}, api_key="test-api-key-that-is-long-enough"
+        )
+        result = provider.generate({"match_id": "1"})
+        self.assertEqual(result["status"], "deferred")
         urlopen.assert_not_called()
 
 

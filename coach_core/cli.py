@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -10,7 +11,7 @@ from typing import Any
 
 from .analysis import analyze_match, build_training_plan
 from .demo import DEMO_MATCH
-from .llm import LocalModelProvider, pull_model
+from .llm import GeminiModelProvider, LocalModelProvider, pull_model
 from .runtime import MODEL_CATALOG, runtime_status
 from .store import Store
 
@@ -31,28 +32,46 @@ def normalize_payload(payload: Any) -> list[dict[str, Any]]:
     raise ValueError("Unsupported JSON format: expected an OpenDota match or a list of matches")
 
 
+def app_runtime_status(store: Store) -> dict[str, Any]:
+    selected_model = store.get_setting("selected_model", "auto") or "auto"
+    provider = store.get_setting("ai_provider", "local") or "local"
+    status = runtime_status(selected_model)
+    status["ai_provider"] = provider
+    status["gemini"] = {
+        "configured": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+        "model": os.environ.get("LANEMIND_GEMINI_MODEL", GeminiModelProvider.DEFAULT_MODEL),
+    }
+    return status
+
+
 def process(store: Store, request: dict[str, Any]) -> Any:
     action = request.get("action")
     if action == "runtime_status":
-        return runtime_status(store.get_setting("selected_model", "auto") or "auto")
+        return app_runtime_status(store)
+    if action == "set_ai_provider":
+        provider = str(request.get("provider", "local"))
+        if provider not in {"gemini", "local", "off"}:
+            raise ValueError(f"Unsupported AI provider: {provider}")
+        store.set_setting("ai_provider", provider)
+        return app_runtime_status(store)
     if action == "set_model":
         model = str(request.get("model", "auto"))
         valid_models = {"auto", "off", *(item["id"] for item in MODEL_CATALOG)}
         if model not in valid_models:
             raise ValueError(f"Unsupported model: {model}")
         store.set_setting("selected_model", model)
-        return runtime_status(model)
+        return app_runtime_status(store)
     if action == "pull_model":
         model = str(request["model"])
         if model not in {item["id"] for item in MODEL_CATALOG}:
             raise ValueError(f"Unsupported model: {model}")
-        status = runtime_status(store.get_setting("selected_model", "auto") or "auto")
+        status = app_runtime_status(store)
         if status["dota_active"]:
             return {"status": "deferred", "reason": "dota_active", "model": model}
         if not status["ollama"]["available"]:
             raise ValueError("Ollama is not running. Install or start Ollama before downloading a model.")
         result = pull_model(model)
-        return {**result, "runtime": runtime_status(store.get_setting("selected_model", "auto") or "auto")}
+        return {**result, "runtime": app_runtime_status(store)}
     if action == "generate_summary":
         match_id = str(request["match_id"])
         language = str(request.get("language", "ru"))
@@ -60,14 +79,20 @@ def process(store: Store, request: dict[str, Any]) -> Any:
         if not report:
             raise ValueError(f"Unknown match: {match_id}")
         selected = store.get_setting("selected_model", "auto") or "auto"
-        provider = LocalModelProvider(lambda: runtime_status(selected))
+        provider_name = store.get_setting("ai_provider", "local") or "local"
+        if provider_name == "off":
+            return {"status": "unavailable", "reason": "ai_disabled", "queued": False, "content": None}
+        if provider_name == "gemini":
+            provider = GeminiModelProvider(lambda: runtime_status(selected))
+        else:
+            provider = LocalModelProvider(lambda: runtime_status(selected))
         result = provider.generate(report, language)
         if result["status"] == "complete":
             store.save_ai_summary(match_id, result["model"], language, result["content"])
         return result
     if action == "status":
         reports = store.reports()
-        return {"version": "0.2.0", "reports": reports, "plan": build_training_plan(reports)}
+        return {"version": "0.3.0", "reports": reports, "plan": build_training_plan(reports)}
     if action == "demo":
         report = analyze_match(DEMO_MATCH, 123456789)
         store.save_match(DEMO_MATCH, report, 123456789, "demo")
