@@ -1,0 +1,31 @@
+{
+  "name": "lanemind",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first open source Dota 2 coaching prototype",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && electron . --dev\"",
+    "build": "tsc -p tsconfig.electron.json && vite build",
+    "test": "python -m unittest discover -s tests -v",
+    "check": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && npm test",
+    "smoke": "node tests/electron-smoke.mjs",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "typescript": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "electron": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "concurrently": "latest",
+    "playwright-core": "latest",
+    "wait-on": "latest"
+  }
+}
